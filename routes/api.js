@@ -1,133 +1,114 @@
-/*
-*
-*
-*       Complete the API routing below
-*       
-*       
-*/
-
 'use strict';
 
-const Book = require('../models').Book;
+const { ObjectId } = require('mongodb');
 
-module.exports = function (app) {
-
+module.exports = function (app, collection) {
   app.route('/api/books')
-    .get(async function (req, res){
+    .get(async function (req, res) {
       try {
-        const books = await Book.find({});
-        if (!books) {
-          res.json([]);
-          return;
-        }
-        const formatData = books.map(book => {
-          return {
-            _id: book._id,
-            title: book.title,
-            comments: book.comments,
-            commentcount: book.comments.length
-          };
-      });
-        res.json(formatData);
-        return;
-      }
-      catch (err) {
-        console.log(err);
-        res.send('there was an error getting the books');
-        return;
-      }
-
-      //response will be array of book objects
-      //json res format: [{"_id": bookid, "title": book_title, "commentcount": num_of_comments },...]
-    })
-    
-    .post( async function (req, res){
-      let title = req.body.title;
-      if(!title){
-        res.send('missing required field title');
-        return;
-      }
-      const newBook = new Book({title, comments: []});
-      try {
-        const book = await newBook.save();
-        res.json({_id: book._id, title: book.title});
+        const books = await collection.find().toArray();
+        const response = books.map(book => ({
+          _id: book._id,
+          title: book.title,
+          commentcount: book.comments.length
+        }));
+        res.json(response);
       } catch (err) {
-        res.send('there was an error saving the book');
+        res.status(500).send('Error retrieving books');
       }
     })
-
-
-    
-    .delete(async function(req, res){
+    .post(async function (req, res) {
+      let title = req.body.title;
+      if (!title) {
+        return res.send('missing required field title');
+      }
       try {
-        await Book.deleteMany({});
+        const newBook = { title, comments: [] };
+        const result = await collection.insertOne(newBook);
+        res.json({ _id: result.insertedId, title });
+      } catch (err) {
+        res.status(500).send('Error adding book');
+      }
+    })
+    .delete(async function (req, res) {
+      try {
+        await collection.deleteMany({});
         res.send('complete delete successful');
       } catch (err) {
-        res.send('there was an error deleting all books');
+        res.status(500).send('Error deleting all books');
       }
     });
 
-
-
   app.route('/api/books/:id')
-    .get(async function (req, res){
+    .get(async function (req, res) {
       let bookid = req.params.id;
-      try {
-        const book = await Book.findById(bookid);
-        if (!book) {
-          res.send('no book exists');
-          return;
-        }
-        res.json({
-          _id: book._id,
-          title: book.title,
-          comments: book.comments
-        });
-      } catch (err) {
-        res.send('there was an error getting the book');
+      if (!ObjectId.isValid(bookid)) {
+        return res.send('no book exists');
       }
-      //json res format: {"_id": bookid, "title": book_title, "comments": [comment,comment,...]}
+      try {
+        const book = await collection.findOne({ _id: new ObjectId(bookid) });
+        if (!book) {
+          return res.send('no book exists');
+        }
+        res.json({ _id: book._id, title: book.title, comments: book.comments });
+      } catch (err) {
+        res.send('no book exists');
+      }
     })
-    
-    .post(async function(req, res){
+    .post(async function (req, res) {
       let bookid = req.params.id;
       let comment = req.body.comment;
+
+      // Verificar se o comentário foi fornecido
       if (!comment) {
-        res.send('missing required field comment');
-        return;
+        return res.send('missing required field comment');
       }
+
+      // Validar se bookid é um ObjectId válido
+      if (!ObjectId.isValid(bookid)) {
+        return res.send('no book exists');
+      }
+
       try {
-        const book = await Book.findById(bookid);
+        // Verificar se o livro existe
+        const book = await collection.findOne({ _id: new ObjectId(bookid) });
         if (!book) {
-          res.send('no book exists');
-          return;
+          return res.send('no book exists');
         }
-        book.comments.push(comment);
-        await book.save();
+
+        // Atualizar o livro com o novo comentário
+        await collection.updateOne(
+          { _id: new ObjectId(bookid) },
+          { $push: { comments: comment } }
+        );
+
+        // Buscar o livro atualizado
+        const updatedBook = await collection.findOne({ _id: new ObjectId(bookid) });
+
+        // Retornar o objeto do livro atualizado
         res.json({
-          _id: book._id,
-          title: book.title,
-          comments: book.comments
+          _id: updatedBook._id,
+          title: updatedBook.title,
+          comments: updatedBook.comments
         });
       } catch (err) {
-        res.send('there was an error adding the comment');
+        console.error('Error in POST /api/books/:id:', err);
+        res.send('no book exists');
       }
-      //json res format same as .get
     })
-    
-    .delete(async function(req, res){
+    .delete(async function (req, res) {
       let bookid = req.params.id;
+      if (!ObjectId.isValid(bookid)) {
+        return res.send('no book exists');
+      }
       try {
-        const book = await Book.findByIdAndDelete(bookid);
-        if (!book) {
-          res.send('no book exists');
-          return;
+        const result = await collection.deleteOne({ _id: new ObjectId(bookid) });
+        if (result.deletedCount === 0) {
+          return res.send('no book exists');
         }
         res.send('delete successful');
       } catch (err) {
-        res.send('there was an error deleting the book');
+        res.send('no book exists');
       }
-      //if successful response will be 'delete successful'
     });
-  
 };
